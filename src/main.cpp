@@ -1,181 +1,220 @@
-#include "imgui.h"
-#include "backends/imgui_impl_glfw.h"
-#include "backends/imgui_impl_opengl3.h"
-#include <opencv2/opencv.hpp>
+#define IMGUI_DEFINE_MATH_OPERATORS
 
+#include "imgui.h"
+#include "imgui_impl_glfw.h"
+#include "imgui_impl_opengl3.h"
+#include "imnodes.h"
+#include "imgui_internal.h"
 #include <GLFW/glfw3.h>
+#include <vector>
+#include <string>
+#include <optional>
+#include <map>
 #include <iostream>
 
-struct Node {
-    std::string title;
-    int id;
-    ImVec2 position;
-    char inputText[128] = "";
-    std::string savedValue;
-    cv::Mat imageMat;                   // OpenCV image
-    GLuint textureID = 0;               // OpenGL texture
+enum class OperationType {
+    Blur,
+    Brightness,
+    LoadImage
+};
 
-    Node(const std::string& t, int id, ImVec2 pos)
-        : title(t), id(id), position(pos), savedValue("") {}
+struct Node {
+    int id;
+    OperationType type;
+    std::string name;
+    ImVec2 position;
+    int inputSlotId;
+    int outputSlotId;
+    float width = 150.0f; // Default resizable width
+
+    std::optional<float> value; // For sliders/input fields like brightness
+    std::optional<std::string> imagePath; // For LoadImage
+};
+
+struct Link {
+    int id;
+    int fromSlot;
+    int toSlot;
 };
 
 std::vector<Node> nodes;
+std::vector<Link> links;
+int nodeCounter = 0;
+int slotCounter = 1000;
+int linkCounter = 0;
+
+void AddNode(OperationType type, const std::string& name, ImVec2 pos) {
+    Node node;
+    node.id = nodeCounter++;
+    node.type = type;
+    node.name = name;
+    node.position = pos;
+    node.inputSlotId = slotCounter++;
+    node.outputSlotId = slotCounter++;
+    if (type == OperationType::Brightness || type == OperationType::Blur) {
+        node.value = 0.0f;
+    } else if (type == OperationType::LoadImage) {
+        node.imagePath = "";
+    }    
+    nodes.push_back(node);
+}
+
+void RenderNodes() {
+    ImGui::SetNextWindowPos(ImVec2(200, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImGui::GetIO().DisplaySize - ImVec2(200, 0), ImGuiCond_Always);
+
+    ImGui::Begin("Node Editor Area", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+    ImNodes::BeginNodeEditor();
+
+    for (Node& node : nodes) {
+        ImNodes::BeginNode(node.id);
+
+        ImNodes::BeginNodeTitleBar();
+        ImGui::TextUnformatted(node.name.c_str());
+        ImNodes::EndNodeTitleBar();
+
+        ImGui::PushItemWidth(node.width);
+
+        if (node.type != OperationType::LoadImage) {
+            ImNodes::BeginInputAttribute(node.inputSlotId);
+            ImGui::Text("Input");
+            ImNodes::EndInputAttribute();
+        }
+
+        if (node.value.has_value()) {
+            static std::map<int, std::string> inputBuffers;
+            char buf[32];
+            snprintf(buf, sizeof(buf), "##val%d", node.id);
+
+            if (inputBuffers.find(node.id) == inputBuffers.end())
+                inputBuffers[node.id] = std::to_string(*node.value);
+
+            char input[32];
+            strncpy(input, inputBuffers[node.id].c_str(), sizeof(input));
+            input[sizeof(input) - 1] = '\0';
+
+            if (ImGui::InputText(buf, input, IM_ARRAYSIZE(input), ImGuiInputTextFlags_EnterReturnsTrue)) {
+                try {
+                    *node.value = std::stof(input);
+                    inputBuffers[node.id] = input;
+                } catch (...) {
+                    // handle parse error (optional)
+                }
+            }
+        }
+
+        if (node.imagePath.has_value()) {
+            static std::map<int, std::string> pathBuffers;
+            char buf[64];
+            snprintf(buf, sizeof(buf), "##path%d", node.id);
+        
+            if (pathBuffers.find(node.id) == pathBuffers.end())
+                pathBuffers[node.id] = *node.imagePath;
+        
+            char input[256];
+            strncpy(input, pathBuffers[node.id].c_str(), sizeof(input));
+            input[sizeof(input) - 1] = '\0';
+        
+            if (ImGui::InputText(buf, input, IM_ARRAYSIZE(input), ImGuiInputTextFlags_EnterReturnsTrue)) {
+                *node.imagePath = input;
+                pathBuffers[node.id] = input;
+            }
+        }
+
+        ImNodes::BeginOutputAttribute(node.outputSlotId);
+        ImGui::Text("Output");
+        ImNodes::EndOutputAttribute();
+
+        // Resizer grip
+        ImVec2 grip_pos = ImGui::GetCursorScreenPos();
+        ImGui::SetCursorScreenPos(ImVec2(grip_pos.x + node.width, grip_pos.y));
+        ImGui::PushID(node.id); // Unique ID for each grip
+        ImGui::Button(">");     // Visual resizer
+        if (ImGui::IsItemActive()) {
+            node.width += ImGui::GetIO().MouseDelta.x;
+            node.width = ImClamp(node.width, 100.0f, 300.0f); // Clamp to a reasonable range
+        }
+        ImGui::PopID();
+
+        ImNodes::EndNode();
+    }
+
+    for (const auto& link : links) {
+        ImNodes::Link(link.id, link.fromSlot, link.toSlot);
+    }
+
+    ImNodes::EndNodeEditor();
+
+    int startAttr, endAttr;
+    if (ImNodes::IsLinkCreated(&startAttr, &endAttr)) {
+        links.push_back({linkCounter++, startAttr, endAttr});
+    }
+
+    ImGui::End();
+}
+
+void ShowSidePanel() {
+    ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
+    ImGui::SetNextWindowSize(ImVec2(200, ImGui::GetIO().DisplaySize.y), ImGuiCond_Always);
+    ImGui::Begin("Add Nodes", nullptr, ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoCollapse);
+
+    if (ImGui::Button("Add Blur Node")) {
+        AddNode(OperationType::Blur, "Blur Node", ImVec2(250, 100));
+    }
+    if (ImGui::Button("Add Brightness Node")) {
+        AddNode(OperationType::Brightness, "Brightness Node", ImVec2(250, 200));
+    }
+    if (ImGui::Button("Add Load Image Node")) {
+        AddNode(OperationType::LoadImage, "Load Image", ImVec2(250, 300));
+    }
+
+    ImGui::End();
+}
+
+void RenderUI() {
+    ShowSidePanel();
+    RenderNodes();
+}
 
 int main() {
-    // Init GLFW
-    if (!glfwInit()) return -1;
+    if (!glfwInit()) {
+        std::cerr << "Failed to initialize GLFW" << std::endl;
+        return -1;
+    }
 
-    // Setup OpenGL (3.2 Core Profile, required on macOS)
+    const char* glsl_version = "#version 150";
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 2);
     glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
-    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // Required on macOS
+    glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 
-    GLFWwindow* window = glfwCreateWindow(800, 600, "ImGui Button Window", nullptr, nullptr);
-    if (!window) return -1;
+    GLFWwindow* window = glfwCreateWindow(1280, 720, "Node Editor", NULL, NULL);
+    if (!window) {
+        std::cerr << "Failed to create GLFW window" << std::endl;
+        glfwTerminate();
+        return -1;
+    }
     glfwMakeContextCurrent(window);
-    glfwSwapInterval(1); // Enable vsync
+    glfwSwapInterval(1);
 
-    // Init ImGui
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
+    ImNodes::CreateContext();
     ImGuiIO& io = ImGui::GetIO(); (void)io;
 
     ImGui::StyleColorsDark();
-
     ImGui_ImplGlfw_InitForOpenGL(window, true);
-    ImGui_ImplOpenGL3_Init("#version 150 core");
+    ImGui_ImplOpenGL3_Init(glsl_version);
 
-    // Main loop
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
 
-        // Start ImGui frame
         ImGui_ImplOpenGL3_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
 
-        // Set position and size for the side panel (left side of screen)
-        ImGui::SetNextWindowPos(ImVec2(0, 0), ImGuiCond_Always);
-        ImGui::SetNextWindowSize(ImVec2(200, ImGui::GetIO().DisplaySize.y), ImGuiCond_Always);
+        RenderUI();
 
-        // Begin the window as a fixed, borderless panel
-        ImGui::Begin("Add Nodes", nullptr,
-            ImGuiWindowFlags_NoTitleBar |
-            ImGuiWindowFlags_NoResize |
-            ImGuiWindowFlags_NoMove |
-            ImGuiWindowFlags_NoCollapse |
-            ImGuiWindowFlags_NoBringToFrontOnFocus);
-
-        // Add your buttons
-        ImGui::Text("Add Nodes");
-        ImGui::Separator();
-
-        static int nodeCounter = 0;
-
-        if (ImGui::Button("Add Blur Node")) {
-            nodes.emplace_back("Blur Node", nodeCounter++, ImVec2(250, 50 + nodes.size() * 80));
-        }
-
-        if (ImGui::Button("Add Brightness Node")) {
-            nodes.emplace_back("Brightness Node", nodeCounter++, ImVec2(250, 50 + nodes.size() * 80));
-        }
-
-        if (ImGui::Button("Add Load Image Node")) {
-            nodes.emplace_back("Load Image Node", nodeCounter++, ImVec2(250, 50 + nodes.size() * 80));
-        }        
-
-        ImGui::End();
-
-        int nodeToDelete = -1;  // -1 means no deletion requested
-
-        for (Node& node : nodes) {
-            std::string windowTitle = node.title + "##" + std::to_string(node.id);
-            ImGui::SetNextWindowPos(node.position, ImGuiCond_FirstUseEver);
-            ImGui::Begin(windowTitle.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-        
-            if (node.title == "Load Image Node") {
-                ImGui::InputText("Image Path", node.inputText, IM_ARRAYSIZE(node.inputText),
-                                 ImGuiInputTextFlags_EnterReturnsTrue);
-        
-                if (ImGui::IsItemDeactivatedAfterEdit()) {
-                    node.savedValue = node.inputText;
-        
-                    // Load image with OpenCV
-                    node.imageMat = cv::imread(node.savedValue);
-                    if (!node.imageMat.empty()) {
-                        // Convert BGR to RGB
-                        cv::cvtColor(node.imageMat, node.imageMat, cv::COLOR_BGR2RGB);
-                        cv::flip(node.imageMat, node.imageMat, 0);
-        
-                        // Generate OpenGL texture
-                        if (node.textureID) glDeleteTextures(1, &node.textureID);
-
-                        glGenTextures(1, &node.textureID);
-                        glBindTexture(GL_TEXTURE_2D, node.textureID);
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-                        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-
-                        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-
-                        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB,
-                                    node.imageMat.cols, node.imageMat.rows,
-                                    0, GL_RGB, GL_UNSIGNED_BYTE, node.imageMat.data);
-
-                        glBindTexture(GL_TEXTURE_2D, 0); // Unbind
-
-                    }
-                }
-        
-                // Show texture if available
-                if (node.textureID) {
-                    float maxDisplayWidth = 200.0f;
-                    float scale = maxDisplayWidth / node.imageMat.cols;
-                    ImVec2 displaySize = ImVec2(
-                        maxDisplayWidth,
-                        node.imageMat.rows * scale
-                    );
-                    ImGui::Image((ImTextureID)node.textureID, displaySize,
-                    ImVec2(0.0f, 1.0f),  // Top-left
-                    ImVec2(1.0f, 0.0f)); // Bottom-right;
-                }
-            }
-        
-            node.position = ImGui::GetWindowPos();
-            ImGui::End();
-        }
-        
-
-        // for (int i = 0; i < nodes.size(); ++i) {
-        //     Node& node = nodes[i];
-
-        //     std::string windowTitle = node.title + "##" + std::to_string(node.id);
-
-        //     ImGui::SetNextWindowPos(node.position, ImGuiCond_FirstUseEver);
-        //     ImGui::Begin(windowTitle.c_str(), nullptr, ImGuiWindowFlags_AlwaysAutoResize);
-
-        //     if (ImGui::InputText("Input", node.inputText, IM_ARRAYSIZE(node.inputText), ImGuiInputTextFlags_EnterReturnsTrue)) {
-        //         node.savedValue = node.inputText;
-        //         std::cout << "Saved: " << node.savedValue << std::endl;
-        //     }
-
-        //     // 🗑️ Remove button
-        //     if (ImGui::Button("Remove Node")) {
-        //         nodeToDelete = i;  // mark this node for deletion
-        //     }
-
-        //     node.position = ImGui::GetWindowPos();
-
-        //     ImGui::End();
-        // }
-
-        if (nodeToDelete != -1) {
-            nodes.erase(nodes.begin() + nodeToDelete);
-        }
-
-        // Render
         ImGui::Render();
         int display_w, display_h;
         glfwGetFramebufferSize(window, &display_w, &display_h);
@@ -183,14 +222,17 @@ int main() {
         glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+
         glfwSwapBuffers(window);
     }
 
-    // Cleanup
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();
+    ImNodes::DestroyContext();
     ImGui::DestroyContext();
+
     glfwDestroyWindow(window);
     glfwTerminate();
+
     return 0;
 }

@@ -7,8 +7,8 @@ EXEC = app
 
 $(EXEC):
 	$(CC) \
-  src/main.cpp imgui/*.cpp imgui/backends/imgui_impl_glfw.cpp imgui/backends/imgui_impl_opengl3.cpp \
-  -Iimgui -Iimgui/backends -I/opt/homebrew/include -I$(OPENCVINCLUDEPATH) -L/opt/homebrew/lib -L$(OPENCVLIBPATH) \
+  src/main.cpp external/imnodes/imnodes.cpp external/imgui/*.cpp external/imgui/backends/imgui_impl_glfw.cpp external/imgui/backends/imgui_impl_opengl3.cpp \
+  -Iexternal/imgui -Iexternal/imgui/backends -I/opt/homebrew/include -I$(OPENCVINCLUDEPATH) -Iexternal/imnodes -L/opt/homebrew/lib -L$(OPENCVLIBPATH) \
   $(OPENCVLIBS) \
   -lglfw -framework OpenGL \
   -std=c++$(VER) -o $(EXEC)
