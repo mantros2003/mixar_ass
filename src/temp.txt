@@ -1,0 +1,28 @@
+
+cv::Mat image = cv::imread("assets/sample.png");
+
+if (image.empty()) {
+    std::cout << "Could not read the image\n";
+    return 1;
+}
+
+cv::imshow("Display window", image);
+
+cv::Mat res = ImageProcessor::applyBlur(image, 15);
+
+cv::imshow("Brightness", res);
+cv::waitKey(0);
+
+return 0;
+
+
+
+
+CC = clang++
+VER = 17
+INCLUDEPATH = /opt/homebrew/opt/opencv/include/opencv4
+LIBPATH = /opt/homebrew/opt/opencv/lib
+EXEC = app
+
+$(EXEC):
+	$(CC) src/main.cpp src/ImageProcessor.cpp -std=c++$(VER) -I$(INCLUDEPATH) -L$(LIBPATH) -lopencv_core -lopencv_imgcodecs -lopencv_highgui -lopencv_imgproc -o $(EXEC)
