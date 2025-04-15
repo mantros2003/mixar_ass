@@ -22,7 +22,19 @@ int nodeCounter = 0;
 int slotCounter = 1000;
 int linkCounter = 0;
 
-// src/main.cpp
+void displayImage(Node& node) {
+    // Calculate display size, maintaining aspect ratio within node width
+    float aspectRatio = (float)node.imageHeight / (float)node.imageWidth;
+    float displayWidth = node.width - ImGui::GetStyle().FramePadding.x * 2; // Use node width minus padding
+    float displayHeight = displayWidth * aspectRatio;
+
+    // Center the image horizontally
+    float spaceX = (node.width - displayWidth) / 2.0f;
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + spaceX);
+
+    ImGui::Image((ImTextureID)(uintptr_t)node.textureId, ImVec2(displayWidth, displayHeight));
+}
+
 void AddNode(OperationType type, const std::string& name, ImVec2 pos) {
     Node node;
     node.id = nodeCounter++;
@@ -232,16 +244,7 @@ void RenderLoadImageNode(Node& node) {
 
     // --- Display Image using ImGui::Image ---
     if (node.textureId != 0 && node.imageWidth > 0 && node.imageHeight > 0) {
-        // Calculate display size, maintaining aspect ratio within node width
-        float aspectRatio = (float)node.imageHeight / (float)node.imageWidth;
-        float displayWidth = node.width - ImGui::GetStyle().FramePadding.x * 2; // Use node width minus padding
-        float displayHeight = displayWidth * aspectRatio;
-
-        // Center the image horizontally
-        float spaceX = (node.width - displayWidth) / 2.0f;
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + spaceX);
-
-        ImGui::Image((ImTextureID)(uintptr_t)node.textureId, ImVec2(displayWidth, displayHeight));
+        displayImage(node);
     } else {
         // Optionally display a placeholder if no image is loaded/valid
         ImGui::TextDisabled("No image loaded");
@@ -305,7 +308,7 @@ void RenderProcessDisplayNode(Node& node) {
         node.processingRequested = true; // Set flag to process
     }
 
-    // --- Trigger Processing ---
+    // --- Trigger Processing and Immediately Update processedImage ---
     if (node.processingRequested) {
         node.processingRequested = false; // Reset flag
 
@@ -314,13 +317,14 @@ void RenderProcessDisplayNode(Node& node) {
             Node* prevNode = FindNodeByOutputAttr(inputLink->fromSlot, nodes);
             if (prevNode) {
                 std::cout << "--- Processing Triggered for Node " << node.id << " ---" << std::endl;
-                // Create a cache for this processing run
                 std::map<int, cv::Mat> processingCache;
                 cv::Mat result = ProcessGraphRecursive(prevNode->id, processingCache, nodes, links);
 
                 if (!result.empty()) {
-                     std::cout << "--- Processing Finished. Updating Texture for Node " << node.id << " ---" << std::endl;
-                    node.loadedCvImage = result; // Store the final result in this node
+                    std::cout << "--- Processing Finished. Updating Texture and Processed Image for Node " << node.id << " ---" << std::endl;
+                    node.loadedCvImage = result; // Store the final result
+                    node.processedImage = result.clone(); // Store the processed image for saving
+
                     // Update this node's texture
                     if (CreateOrUpdateTexture(node.loadedCvImage.value(), node.textureId)) {
                         node.imageWidth = node.loadedCvImage.value().cols;
@@ -331,6 +335,7 @@ void RenderProcessDisplayNode(Node& node) {
                         node.imageWidth = 0;
                         node.imageHeight = 0;
                         node.loadedCvImage.reset();
+                        node.processedImage.reset();
                         std::cerr << "Error: Failed to create texture for ProcessDisplay node " << node.id << std::endl;
                     }
                 } else {
@@ -341,38 +346,47 @@ void RenderProcessDisplayNode(Node& node) {
                     node.imageWidth = 0;
                     node.imageHeight = 0;
                     node.loadedCvImage.reset();
+                    node.processedImage.reset();
                 }
             } else {
-                 std::cerr << "Error: Could not find node connected to input of ProcessDisplay node " << node.id << std::endl;
+                std::cerr << "Error: Could not find node connected to input of ProcessDisplay node " << node.id << std::endl;
+                // Clear results if no input node
+                if (node.textureId != 0) glDeleteTextures(1, &node.textureId);
+                node.textureId = 0;
+                node.imageWidth = 0;
+                node.imageHeight = 0;
+                node.loadedCvImage.reset();
+                node.processedImage.reset();
             }
         } else {
             std::cerr << "Error: ProcessDisplay node " << node.id << " is not connected." << std::endl;
-            // Clear previous result if not connected
+            // Clear results if not connected
             if (node.textureId != 0) glDeleteTextures(1, &node.textureId);
             node.textureId = 0;
             node.imageWidth = 0;
             node.imageHeight = 0;
             node.loadedCvImage.reset();
+            node.processedImage.reset();
         }
     }
 
-
     // --- Display Result Image ---
     if (node.textureId != 0 && node.imageWidth > 0 && node.imageHeight > 0) {
-        // Calculate display size, maintaining aspect ratio
-        float aspectRatio = (float)node.imageHeight / (float)node.imageWidth;
-        // Adjust width calculation if needed (e.g., account for button width)
-        float displayWidth = node.width - ImGui::GetStyle().FramePadding.x * 2;
-        float displayHeight = displayWidth * aspectRatio;
-
-        // Center the image horizontally
-        float spaceX = (node.width - displayWidth) / 2.0f;
-        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + spaceX);
-
-        ImGui::Image((ImTextureID)(uintptr_t)node.textureId, ImVec2(displayWidth, displayHeight));
+        displayImage(node);
     } else {
         // Placeholder text
         ImGui::TextDisabled("Result will appear here");
+    }
+
+    // --- Save Button Rendering ---
+    if (node.processedImage.has_value() && !node.processedImage.value().empty()) {
+        if (ImGui::Button(("Save Image##" + std::to_string(node.id)).c_str())) {
+            std::string filename = "output_" + std::to_string(node.id) + ".png";
+            ImageProcessor::saveImage(node.processedImage.value(), filename);
+            std::cout << "Saved processed image to " << filename << std::endl;
+        }
+    } else {
+        ImGui::Text("No image to save");
     }
 }
 

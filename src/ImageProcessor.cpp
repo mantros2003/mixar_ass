@@ -27,6 +27,7 @@ cv::Mat ImageProcessor::applyContrast(const cv::Mat& image, double factor) {
 
 cv::Mat ImageProcessor::applyBlur(const cv::Mat& image, int kernelSize) {
     cv::Mat result;
+    kernelSize = (kernelSize / 2) * 2 + 1;
     cv::GaussianBlur(image, result, cv::Size(kernelSize, kernelSize), 0);
     return result;
 }

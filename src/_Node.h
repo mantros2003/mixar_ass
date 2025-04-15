@@ -34,6 +34,7 @@ struct Node {
     GLuint textureId = 0;
     int imageWidth = 0;
     int imageHeight = 0;
+    std::optional<cv::Mat> processedImage;
 
     // Processing flags
     bool processingRequested = false;

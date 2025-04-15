@@ -55,20 +55,23 @@ cv::Mat ProcessGraphRecursive(int nodeId, std::map<int, cv::Mat>& cache, std::ve
                 // Use the already loaded image if available and path matches, otherwise load
                 // Note: This assumes LoadImage nodes load when path changes.
                 // If not, loading needs to happen here explicitly.
-                 if (!currentNode->loadedCvImage.has_value()) {
-                    std::cout << "Processing: Loading image for node " << nodeId << std::endl;
-                     currentNode->loadedCvImage = ImageProcessor::loadImage(currentNode->imagePath.value());
-                 }
+                if (!currentNode->loadedCvImage.has_value()) {
+                std::cout << "Processing: Loading image for node " << nodeId << std::endl;
+                    currentNode->loadedCvImage = ImageProcessor::loadImage(currentNode->imagePath.value());
+                }
 
                 if (currentNode->loadedCvImage.has_value()) {
                     resultImage = currentNode->loadedCvImage.value().clone(); // Clone to avoid modifying cache
+                    // After resultImage = inputImage.clone();
+                    //currentNode->processedImage = resultImage.clone();
+
                 } else {
-                     std::cerr << "Error: Failed to load image for node " << nodeId << " path: " << currentNode->imagePath.value() << std::endl;
-                     resultImage = cv::Mat();
+                    std::cerr << "Error: Failed to load image for node " << nodeId << " path: " << currentNode->imagePath.value() << std::endl;
+                    resultImage = cv::Mat();
                 }
             } else {
-                 std::cerr << "Error: No image path for LoadImage node " << nodeId << std::endl;
-                 resultImage = cv::Mat();
+                std::cerr << "Error: No image path for LoadImage node " << nodeId << std::endl;
+                resultImage = cv::Mat();
             }
             break;
 
@@ -85,9 +88,9 @@ cv::Mat ProcessGraphRecursive(int nodeId, std::map<int, cv::Mat>& cache, std::ve
 
                 Node* prevNode = FindNodeByOutputAttr(inputLink->fromSlot, nodes);
                 if (!prevNode) {
-                     std::cerr << "Error: Could not find node connected to input of " << nodeId << std::endl;
-                     resultImage = cv::Mat();
-                     break; // Exit switch case
+                    std::cerr << "Error: Could not find node connected to input of " << nodeId << std::endl;
+                    resultImage = cv::Mat();
+                    break; // Exit switch case
                 }
 
                 // Recursively process the previous node
@@ -102,14 +105,14 @@ cv::Mat ProcessGraphRecursive(int nodeId, std::map<int, cv::Mat>& cache, std::ve
                     float value = currentNode->value.value_or(0.0f); // Get value safely
 
                     if (currentNode->type == OperationType::Brightness) {
-                         resultImage = ImageProcessor::applyBrightness(inputImage, static_cast<int>(value)); // Assuming value is brightness offset
+                        resultImage = ImageProcessor::applyBrightness(inputImage, static_cast<int>(value)); // Assuming value is brightness offset
                     } else if (currentNode->type == OperationType::Blur) {
-                         int kernelSize = static_cast<int>(value);
-                         if (kernelSize <= 0 || kernelSize % 2 == 0) {
-                             kernelSize = 3; // Default to 3 if value is invalid
-                             std::cerr << "Warning: Invalid blur kernel size (" << value << ") for node " << nodeId << ". Using 3." << std::endl;
-                         }
-                         resultImage = ImageProcessor::applyBlur(inputImage, kernelSize);
+                        int kernelSize = static_cast<int>(value);
+                        if (kernelSize <= 0 || kernelSize % 2 == 0) {
+                            kernelSize = 3; // Default to 3 if value is invalid
+                            std::cerr << "Warning: Invalid blur kernel size (" << value << ") for node " << nodeId << ". Using 3." << std::endl;
+                        }
+                        resultImage = ImageProcessor::applyBlur(inputImage, kernelSize);
                     }
                     // Add other processing node types here...
                 }
